@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PIC Registry — organization contact directory</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,500;0,8..60,600;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  :root {
+    --paper: #EFEAD9;
+    --paper-line: #E3DCC6;
+    --ink: #21301F;
+    --ink-soft: #55604F;
+    --moss: #4B6B43;
+    --moss-dark: #37502F;
+    --stamp: #8A5A2E;
+    --rule: #C9C2AC;
+    --stripe: #E6E0CC;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, serif;
+    font-size: 17px;
+    line-height: 1.55;
+  }
+
+  .mono {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+
+  a { color: var(--moss-dark); }
+  a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--moss);
+    outline-offset: 2px;
+  }
+
+  .wrap {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 0 24px;
+  }
+
+  header.masthead {
+    border-bottom: 3px solid var(--ink);
+    padding: 40px 0 20px;
+  }
+  header.masthead .row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  header.masthead h1 {
+    margin: 0;
+    font-size: 2.1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+  header.masthead p.tagline {
+    margin: 6px 0 0;
+    max-width: 46ch;
+    color: var(--ink-soft);
+    font-size: 1.02rem;
+  }
+  header.masthead .synced {
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    text-align: right;
+    white-space: nowrap;
+  }
+
+  section {
+    padding: 34px 0;
+    border-bottom: 1px solid var(--rule);
+  }
+  section:last-of-type { border-bottom: none; }
+
+  h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    text-transform: none;
+    margin: 0 0 6px;
+    color: var(--ink);
+  }
+  section > p.lede {
+    color: var(--ink-soft);
+    margin: 0 0 18px;
+    max-width: 60ch;
+  }
+
+  .cta-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    display: inline-block;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    padding: 11px 20px;
+    border: 1.5px solid var(--ink);
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+    border-radius: 2px;
+    transition: background 0.15s ease, color 0.15s ease;
+  }
+  .btn:hover { background: var(--moss-dark); border-color: var(--moss-dark); }
+  .btn.secondary {
+    background: transparent;
+    color: var(--ink);
+  }
+  .btn.secondary:hover { background: var(--ink); color: var(--paper); }
+
+  .steps {
+    margin: 18px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 10px;
+  }
+  .steps li {
+    display: grid;
+    grid-template-columns: 22px 1fr;
+    gap: 10px;
+    align-items: baseline;
+    color: var(--ink-soft);
+    font-size: 0.96rem;
+  }
+  .steps li::before {
+    content: "—";
+    color: var(--stamp);
+    font-family: "IBM Plex Mono", monospace;
+  }
+  .steps li strong { color: var(--ink); font-weight: 600; }
+
+  .config-note {
+    margin-top: 16px;
+    font-size: 0.85rem;
+    color: var(--ink-soft);
+    font-family: "IBM Plex Mono", monospace;
+    background: var(--stripe);
+    border: 1px solid var(--rule);
+    padding: 10px 12px;
+    border-radius: 2px;
+  }
+
+  .controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 18px;
+  }
+  .controls input, .controls select {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.85rem;
+    padding: 9px 10px;
+    border: 1px solid var(--rule);
+    background: #fff;
+    color: var(--ink);
+    border-radius: 2px;
+  }
+  .controls input { flex: 1; min-width: 180px; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+  thead th {
+    text-align: left;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 600;
+    font-size: 0.72rem;
+    letter-spacing: 0.02em;
+    color: var(--ink-soft);
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--ink);
+  }
+  tbody td {
+    padding: 9px 10px;
+    border-bottom: 1px solid var(--paper-line);
+    vertical-align: top;
+  }
+  tbody tr:nth-child(even) { background: var(--stripe); }
+  tbody tr:hover { background: #DDD6BC; }
+  td.org { font-weight: 600; }
+  td.sector { color: var(--ink-soft); font-size: 0.82rem; }
+  td.contact, td.role {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+  }
+
+  .empty-state, .load-state {
+    padding: 26px 0;
+    color: var(--ink-soft);
+    font-size: 0.95rem;
+  }
+  .empty-state strong { color: var(--ink); }
+
+  footer {
+    padding: 24px 0 60px;
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+    font-family: "IBM Plex Mono", monospace;
+  }
+  footer a { color: var(--ink-soft); }
+
+  @media (max-width: 560px) {
+    header.masthead h1 { font-size: 1.6rem; }
+    header.masthead .synced { text-align: left; }
+    table, thead, tbody, th, td, tr { display: block; }
+    thead { display: none; }
+    tbody tr {
+      border: 1px solid var(--rule);
+      border-radius: 2px;
+      margin-bottom: 10px;
+      padding: 10px;
+      background: #fff;
+    }
+    tbody td {
+      border: none;
+      padding: 3px 0;
+    }
+    tbody td::before {
+      content: attr(data-label);
+      display: block;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 0.68rem;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="row">
+      <div>
+        <h1>PIC Registry</h1>
+        <p class="tagline">A running directory of contact points at NGOs and corporates, sector by sector.</p>
+      </div>
+      <div class="synced mono" id="synced-at">checking last sync…</div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Add or scrape a sector</h2>
+    <p class="lede">
+      The actual scraping runs on GitHub Actions, not in your browser — that keeps this page free to host and means nothing ever needs a server of your own. Click through, fill in the fields, and results land back in this repo automatically.
+    </p>
+    <div class="cta-row">
+      <a class="btn" id="run-link" href="#" target="_blank" rel="noopener">Open the scrape form on GitHub</a>
+      <a class="btn secondary" id="csv-link" href="data/results.csv" target="_blank" rel="noopener">Download results.csv</a>
+    </div>
+    <ol class="steps">
+      <li><strong>Open the form</strong> — click above, then "Run workflow" in the top right.</li>
+      <li><strong>Fill it in</strong> — either a sector already in the library, or a brand-new org's name and page URLs.</li>
+      <li><strong>Wait ~1–2 minutes</strong> — then refresh this page. New rows are committed straight to this repo.</li>
+    </ol>
+    <p class="config-note">Runs automatically every Monday too, re-scraping everything already in the library.</p>
+  </section>
+
+  <section>
+    <h2>Directory</h2>
+    <p class="lede">Search or filter what's been collected so far.</p>
+    <div class="controls">
+      <input type="text" id="search" placeholder="Search org, name, or role…" autocomplete="off">
+      <select id="sector-filter">
+        <option value="">All sectors</option>
+      </select>
+    </div>
+    <div id="table-container">
+      <div class="load-state">Loading directory…</div>
+    </div>
+  </section>
+
+  <footer>
+    <span id="row-count"></span> · Data collected only from information organizations publish themselves.
+  </footer>
+
+</div>
+
+<script>
+  // ---- Configure this for your repo ----
+  const GITHUB_USER = "YOUR-GITHUB-USERNAME";
+  const GITHUB_REPO = "YOUR-REPO-NAME";
+  // ---------------------------------------
+
+  const runLink = document.getElementById("run-link");
+  runLink.href = `https://github.com/${GITHUB_USER}/${GITHUB_REPO}/actions/workflows/scrape.yml`;
+
+  let allRows = [];
+
+  function renderTable(rows) {
+    const container = document.getElementById("table-container");
+    if (!rows.length) {
+      container.innerHTML = `<div class="empty-state"><strong>Nothing here yet.</strong> Run a scrape above, then refresh this page.</div>`;
+      document.getElementById("row-count").textContent = "";
+      return;
+    }
+    const rowsHtml = rows.map(r => `
+      <tr>
+        <td class="org" data-label="Org">${escapeHtml(r["Org Name"] || "")}</td>
+        <td class="sector" data-label="Sector">${escapeHtml(r["Sector"] || "")}</td>
+        <td data-label="PIC">${escapeHtml(r["PIC Name"] || "—")}</td>
+        <td class="role" data-label="Role">${escapeHtml(r["Role/Title"] || "")}</td>
+        <td class="contact" data-label="Contact">${escapeHtml(r["Org Email"] || "")}${r["Org Phone"] ? " · " + escapeHtml(r["Org Phone"]) : ""}</td>
+      </tr>
+    `).join("");
+    container.innerHTML = `
+      <table>
+        <thead>
+          <tr><th>Org</th><th>Sector</th><th>PIC</th><th>Role</th><th>Contact</th></tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+    `;
+    document.getElementById("row-count").textContent = `${rows.length} record${rows.length === 1 ? "" : "s"}`;
+  }
+
+  function escapeHtml(str) {
+    return String(str).replace(/[&<>"']/g, c => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+  }
+
+  function applyFilters() {
+    const q = document.getElementById("search").value.trim().toLowerCase();
+    const sector = document.getElementById("sector-filter").value;
+    const filtered = allRows.filter(r => {
+      const matchesSector = !sector || r["Sector"] === sector;
+      const haystack = `${r["Org Name"]} ${r["PIC Name"]} ${r["Role/Title"]}`.toLowerCase();
+      const matchesQuery = !q || haystack.includes(q);
+      return matchesSector && matchesQuery;
+    });
+    renderTable(filtered);
+  }
+
+  document.getElementById("search").addEventListener("input", applyFilters);
+  document.getElementById("sector-filter").addEventListener("change", applyFilters);
+
+  Papa.parse("data/results.csv", {
+    download: true,
+    header: true,
+    skipEmptyLines: true,
+    complete: (results) => {
+      allRows = results.data;
+      const sectors = [...new Set(allRows.map(r => r["Sector"]).filter(Boolean))].sort();
+      const select = document.getElementById("sector-filter");
+      sectors.forEach(s => {
+        const opt = document.createElement("option");
+        opt.value = s;
+        opt.textContent = s;
+        select.appendChild(opt);
+      });
+      renderTable(allRows);
+    },
+    error: () => {
+      document.getElementById("table-container").innerHTML =
+        `<div class="empty-state"><strong>No data yet.</strong> Run a scrape above, then refresh this page.</div>`;
+    }
+  });
+
+  fetch("data/last_run.txt")
+    .then(r => r.ok ? r.text() : Promise.reject())
+    .then(text => { document.getElementById("synced-at").textContent = "last synced " + text.trim(); })
+    .catch(() => { document.getElementById("synced-at").textContent = "not synced yet"; });
+</script>
+
+</body>
+</html>

@@ -1,0 +1,18 @@
+{
+  "organizations": [
+    {
+      "name": "Indonesia Research Institute for Decarbonization (IRID)",
+      "sector": "Environmental NGO",
+      "team_pages": ["https://irid.or.id/en/tim-irid/"],
+      "contact_pages": ["https://irid.or.id/en/hubungi-kami/"],
+      "render_js": false
+    },
+    {
+      "name": "Kopernik",
+      "sector": "Environmental NGO",
+      "team_pages": ["https://kopernik.info/en/about/our-team"],
+      "contact_pages": ["https://kopernik.info/en/about/contact", "https://kopernik.info/en/user-agreement"],
+      "render_js": true
+    }
+  ]
+}
