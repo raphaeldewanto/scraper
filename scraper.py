@@ -51,7 +51,7 @@ import re
 import sys
 import time
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse, parse_qs, unquote
+from urllib.parse import urljoin, urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
@@ -213,33 +213,44 @@ def extract_team_members(html: str):
 # Discovery mode — general-purpose: find orgs for ANY sector/keyword
 # ---------------------------------------------------------------------
 
-def duckduckgo_search(query: str, max_results: int = 8):
-    """No-API-key web search via DuckDuckGo's HTML endpoint. Best-effort:
-    DuckDuckGo may rate-limit or change its markup, so treat results as
-    a starting point to review, not a guaranteed complete list."""
-    results = []
+def serpapi_search(query: str, max_results: int = 8):
+    """Web search via SerpApi (https://serpapi.com). Requires a
+    SERPAPI_KEY environment variable / GitHub secret.
+
+    Why not a keyless search like DuckDuckGo's HTML page? It works
+    fine from a home connection, but search engines are much more
+    aggressive about blocking automated requests from cloud/CI IP
+    ranges — which is exactly what GitHub Actions runners use. In
+    practice that meant runs from Actions silently found 0 results.
+    A proper API key sidesteps that."""
+    api_key = os.environ.get("SERPAPI_KEY", "")
+    if not api_key:
+        print("  [!] No SERPAPI_KEY found. Discovery mode needs a free "
+              "SerpApi key set as a GitHub secret — see README.md 'Set up "
+              "search' section.", file=sys.stderr)
+        return []
+
     try:
         resp = requests.get(
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            headers=HEADERS,
+            "https://serpapi.com/search.json",
+            params={"q": query, "api_key": api_key, "num": max_results},
             timeout=TIMEOUT,
         )
         resp.raise_for_status()
+        data = resp.json()
     except Exception as e:
         print(f"  [!] Search failed: {e}", file=sys.stderr)
-        return results
+        return []
 
-    soup = BeautifulSoup(resp.text, "lxml")
+    if "error" in data:
+        print(f"  [!] SerpApi returned an error: {data['error']}", file=sys.stderr)
+        return []
+
+    results = []
     seen_domains = set()
-    links = soup.select("a.result__a") or soup.select("a[href]")
-    for a in links:
-        href = a.get("href", "")
-        parsed = urlparse(href)
-        qs = parse_qs(parsed.query)
-        if "uddg" in qs:
-            href = unquote(qs["uddg"][0])
-        if not href.startswith("http"):
+    for item in data.get("organic_results", []):
+        href = item.get("link", "")
+        if not href:
             continue
         d = domain_of(href)
         if any(b in d for b in SEARCH_BLOCKLIST_DOMAINS):
@@ -247,8 +258,7 @@ def duckduckgo_search(query: str, max_results: int = 8):
         if d in seen_domains:
             continue
         seen_domains.add(d)
-        title = a.get_text(" ", strip=True)
-        results.append((title, href))
+        results.append((item.get("title", ""), href))
         if len(results) >= max_results:
             break
     return results
@@ -286,7 +296,7 @@ def guess_org_name(homepage_url: str, html: str) -> str:
 def discover_and_scrape(sector, query, max_results, config, existing_keys, today):
     print(f"\n=== Discovering organizations for sector: {sector} ===")
     print(f"  Search query: {query}")
-    results = duckduckgo_search(query, max_results)
+    results = serpapi_search(query, max_results)
     print(f"  Found {len(results)} candidate site(s) (after filtering out social platforms).")
 
     discovered_orgs = []
