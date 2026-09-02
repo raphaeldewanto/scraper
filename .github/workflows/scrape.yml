@@ -1,40 +1,58 @@
 name: Run PIC Scraper
 
 on:
-  # Weekly recurring run, scrapes everything already saved in config.json
+  # Weekly recurring run, re-scrapes everything already saved in config.json
   schedule:
     - cron: "0 2 * * 1"   # every Monday 02:00 UTC
 
   # Manual run — GitHub renders these as a form when you click "Run workflow"
   workflow_dispatch:
     inputs:
+      mode:
+        description: "What do you want to do?"
+        required: true
+        type: choice
+        default: "Discover new organizations (web search)"
+        options:
+          - "Discover new organizations (web search)"
+          - "Re-scrape a sector already in the library"
+          - "Add one specific organization manually"
       sector:
-        description: "Scrape an existing sector (exact match, e.g. Environmental NGO). Leave blank if adding a new org below."
+        description: "Sector / keyword (e.g. Environmental NGO, Retail Corporate, Islamic Boarding School). Used by the first two modes above."
         required: false
         type: string
+      query:
+        description: "(Discover mode only) Custom search phrase. Leave blank to auto-build one from the sector."
+        required: false
+        type: string
+      max_results:
+        description: "(Discover mode only) How many candidate sites to check, max ~15."
+        required: false
+        type: string
+        default: "8"
       org_name:
-        description: "NEW org name (leave blank to just scrape the sector above)"
+        description: "(Manual add only) New org name"
         required: false
         type: string
       org_sector:
-        description: "Sector for the new org (e.g. Environmental NGO, Retail Corporate)"
+        description: "(Manual add only) Sector for the new org"
         required: false
         type: string
       team_url:
-        description: "New org's Team / About / Leadership page URL"
+        description: "(Manual add only) Team / About / Leadership page URL"
         required: false
         type: string
       contact_url:
-        description: "New org's Contact page URL"
+        description: "(Manual add only) Contact page URL"
         required: false
         type: string
       render_js:
-        description: "Is the site JS-heavy (React/Vue/Next.js)?"
+        description: "(Manual add only) Is the site JS-heavy (React/Vue/Next.js)?"
         required: false
         type: boolean
         default: false
       save_to_library:
-        description: "Save this new org into config.json for future runs?"
+        description: "(Manual add only) Save this org into config.json for future runs?"
         required: false
         type: boolean
         default: true
@@ -64,15 +82,31 @@ jobs:
 
       - name: Scrape (manual run — form inputs)
         if: github.event_name == 'workflow_dispatch'
+        env:
+          MODE: ${{ github.event.inputs.mode }}
+          SECTOR: ${{ github.event.inputs.sector }}
+          QUERY: ${{ github.event.inputs.query }}
+          MAX_RESULTS: ${{ github.event.inputs.max_results }}
+          ORG_NAME: ${{ github.event.inputs.org_name }}
+          ORG_SECTOR: ${{ github.event.inputs.org_sector }}
+          TEAM_URL: ${{ github.event.inputs.team_url }}
+          CONTACT_URL: ${{ github.event.inputs.contact_url }}
+          RENDER_JS: ${{ github.event.inputs.render_js }}
+          SAVE_TO_LIBRARY: ${{ github.event.inputs.save_to_library }}
         run: |
-          python scraper.py \
-            --sector "${{ github.event.inputs.sector }}" \
-            --org-name "${{ github.event.inputs.org_name }}" \
-            --org-sector "${{ github.event.inputs.org_sector }}" \
-            --team-url "${{ github.event.inputs.team_url }}" \
-            --contact-url "${{ github.event.inputs.contact_url }}" \
-            --render-js "${{ github.event.inputs.render_js }}" \
-            --save-to-library "${{ github.event.inputs.save_to_library }}"
+          if [ "$MODE" = "Discover new organizations (web search)" ]; then
+            python scraper.py --discover --sector "$SECTOR" --query "$QUERY" --max-results "$MAX_RESULTS"
+          elif [ "$MODE" = "Add one specific organization manually" ]; then
+            python scraper.py \
+              --org-name "$ORG_NAME" \
+              --org-sector "$ORG_SECTOR" \
+              --team-url "$TEAM_URL" \
+              --contact-url "$CONTACT_URL" \
+              --render-js "$RENDER_JS" \
+              --save-to-library "$SAVE_TO_LIBRARY"
+          else
+            python scraper.py --sector "$SECTOR"
+          fi
 
       - name: Commit results back to the repo
         run: |
