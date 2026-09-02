@@ -22,6 +22,39 @@
         "https://kopernik.info/en/user-agreement"
       ],
       "render_js": true
+    },
+    {
+      "name": "25 International Human Rights Organizations",
+      "sector": "Human Rights NGO",
+      "team_pages": [
+        "https://www.humanrightscareers.com/courses/"
+      ],
+      "contact_pages": [
+        "https://www.humanrightscareers.com/contact/"
+      ],
+      "render_js": false
+    },
+    {
+      "name": "Human Rights Organizations",
+      "sector": "Human Rights NGO",
+      "team_pages": [
+        "https://www.law.georgetown.edu/human-rights-institute/about-us-2/"
+      ],
+      "contact_pages": [
+        "https://www.law.georgetown.edu/human-rights-institute/careers/human-rights-organizations/"
+      ],
+      "render_js": false
+    },
+    {
+      "name": "Non",
+      "sector": "Human Rights NGO",
+      "team_pages": [
+        "https://www.state.gov/countries-areas/timor-leste/"
+      ],
+      "contact_pages": [
+        "https://www.state.gov/bureau-of-democracy-human-rights-and-labor/releases/2025/01/non-governmental-organizations-ngos-in-the-united-states"
+      ],
+      "render_js": false
     }
   ]
 }
