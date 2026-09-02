@@ -93,6 +93,7 @@ jobs:
           CONTACT_URL: ${{ github.event.inputs.contact_url }}
           RENDER_JS: ${{ github.event.inputs.render_js }}
           SAVE_TO_LIBRARY: ${{ github.event.inputs.save_to_library }}
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
         run: |
           if [ "$MODE" = "Discover new organizations (web search)" ]; then
             python scraper.py --discover --sector "$SECTOR" --query "$QUERY" --max-results "$MAX_RESULTS"
