@@ -2,19 +2,25 @@
 PIC Scraper — collects organizational contact info + staff names/roles
 from NGO / Corporate websites.
 
-Runs three ways (see the GitHub Actions workflow for how the web form
+Four ways to run (see the GitHub Actions workflow for how the web form
 maps onto these):
 
-  1. --sector "Environmental NGO"
-     Scrape every org already in config.json under that sector.
+  1. --discover --sector "Retail Corporate" [--query "..."] [--max-results 8]
+     GENERAL PURPOSE MODE. Searches the open web for organizations
+     matching the sector/keyword, guesses each site's contact and
+     team/about pages, scrapes them, and saves discovered orgs into
+     config.json so they're part of the permanent library.
 
-  2. --org-name "New Org" --org-sector "Retail Corporate"
+  2. --sector "Environmental NGO"
+     Re-scrape every org already saved in config.json under that sector
+     (no new search — just refreshes what's already known).
+
+  3. --org-name "New Org" --org-sector "Retail Corporate"
      --team-url "..." --contact-url "..." [--render-js] [--no-save]
-     Scrape ONE new org on the fly. By default it's also saved into
-     config.json so future sector-wide or --all runs pick it up too.
+     Scrape ONE specific org you already know the URLs for.
 
-  3. --all
-     Scrape every org in config.json (used for scheduled/recurring runs).
+  4. --all
+     Scrape every org in config.json (used for the weekly scheduled run).
 
 WHAT THIS DELIBERATELY DOES NOT DO
 -----------------------------------
@@ -23,12 +29,18 @@ and corporates only publish a general contact email, not personal
 ones. Guessing emails produces unverified data and edges toward
 spam-list building, so this only reports what's actually published.
 
+It does not scrape LinkedIn, Facebook, Instagram, and similar
+platforms even if they show up in search results — scraping those
+directly breaches their terms of service regardless of intent.
+
+It checks robots.txt before fetching any page and skips pages that
+disallow it.
+
 OUTPUT
 ------
 data/results.csv — appended to, never overwritten. Re-runs skip rows
 already present (dedup by Org+Record Type+Name+Source URL).
-data/last_run.txt — UTC timestamp of the most recent run, for display
-on the landing page.
+data/last_run.txt — UTC timestamp of the most recent run.
 """
 
 import argparse
@@ -37,7 +49,10 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
+from urllib.parse import urljoin, urlparse, parse_qs, unquote
+from urllib.robotparser import RobotFileParser
 
 import requests
 from bs4 import BeautifulSoup
@@ -45,9 +60,10 @@ from bs4 import BeautifulSoup
 CONFIG_PATH = "config.json"
 OUTPUT_PATH = "data/results.csv"
 LAST_RUN_PATH = "data/last_run.txt"
+BOT_NAME = "PIC-Research-Bot"
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; PIC-Research-Bot/1.0; "
-                  "+contact: replace-with-your-contact-email@example.com)"
+    "User-Agent": f"Mozilla/5.0 (compatible; {BOT_NAME}/1.0; "
+                  f"+contact: replace-with-your-contact-email@example.com)"
 }
 TIMEOUT = 15
 
@@ -64,6 +80,50 @@ NAV_STOPWORDS = {
     "mission", "values", "mission & values", "sign up", "our office",
     "connect with us", "read more",
 }
+
+# Platforms we never scrape directly, even if they appear in search
+# results — scraping these breaches their terms of service regardless
+# of the reason. Their own listing/company pages are not a substitute
+# for an organization's own site anyway (data is often stale there).
+SEARCH_BLOCKLIST_DOMAINS = {
+    "linkedin.com", "facebook.com", "instagram.com", "twitter.com", "x.com",
+    "youtube.com", "wikipedia.org", "google.com", "tiktok.com",
+    "pinterest.com", "glassdoor.com", "indeed.com",
+}
+
+CONTACT_LINK_HINTS = ["contact", "hubungi", "kontak"]
+TEAM_LINK_HINTS = ["team", "tim", "about", "tentang", "struktur", "pengurus",
+                   "leadership", "staff", "kepengurusan", "our-team",
+                   "who-we-are", "profil", "profile"]
+
+_robots_cache = {}
+
+
+def robots_allowed(url: str) -> bool:
+    """Check robots.txt for this URL's domain, caching per-domain results.
+    If robots.txt can't be reached at all, default to allow (most sites
+    that omit robots.txt intend that)."""
+    parsed = urlparse(url)
+    domain = f"{parsed.scheme}://{parsed.netloc}"
+    if domain not in _robots_cache:
+        rp = RobotFileParser()
+        rp.set_url(domain + "/robots.txt")
+        try:
+            rp.read()
+        except Exception:
+            rp = None
+        _robots_cache[domain] = rp
+    rp = _robots_cache[domain]
+    if rp is None:
+        return True
+    try:
+        return rp.can_fetch(BOT_NAME, url)
+    except Exception:
+        return True
+
+
+def domain_of(url: str) -> str:
+    return urlparse(url).netloc.replace("www.", "")
 
 
 def is_probable_name(text: str) -> bool:
@@ -86,6 +146,9 @@ def is_probable_name(text: str) -> bool:
 
 
 def fetch_html(url: str, render_js: bool = False) -> str:
+    if not robots_allowed(url):
+        print(f"    [!] robots.txt disallows fetching {url} — skipping.", file=sys.stderr)
+        return ""
     if render_js:
         try:
             from playwright.sync_api import sync_playwright
@@ -146,6 +209,128 @@ def extract_team_members(html: str):
     return unique_people
 
 
+# ---------------------------------------------------------------------
+# Discovery mode — general-purpose: find orgs for ANY sector/keyword
+# ---------------------------------------------------------------------
+
+def duckduckgo_search(query: str, max_results: int = 8):
+    """No-API-key web search via DuckDuckGo's HTML endpoint. Best-effort:
+    DuckDuckGo may rate-limit or change its markup, so treat results as
+    a starting point to review, not a guaranteed complete list."""
+    results = []
+    try:
+        resp = requests.get(
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            headers=HEADERS,
+            timeout=TIMEOUT,
+        )
+        resp.raise_for_status()
+    except Exception as e:
+        print(f"  [!] Search failed: {e}", file=sys.stderr)
+        return results
+
+    soup = BeautifulSoup(resp.text, "lxml")
+    seen_domains = set()
+    links = soup.select("a.result__a") or soup.select("a[href]")
+    for a in links:
+        href = a.get("href", "")
+        parsed = urlparse(href)
+        qs = parse_qs(parsed.query)
+        if "uddg" in qs:
+            href = unquote(qs["uddg"][0])
+        if not href.startswith("http"):
+            continue
+        d = domain_of(href)
+        if any(b in d for b in SEARCH_BLOCKLIST_DOMAINS):
+            continue
+        if d in seen_domains:
+            continue
+        seen_domains.add(d)
+        title = a.get_text(" ", strip=True)
+        results.append((title, href))
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def find_subpages(homepage_url: str, html: str):
+    """Best-effort guess at a contact page and a team/about page from a
+    homepage's nav links (checks English and Indonesian wording)."""
+    soup = BeautifulSoup(html, "lxml")
+    contact_url, team_url = None, None
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        text = a.get_text(" ", strip=True).lower()
+        combined = (href + " " + text).lower()
+        full_url = urljoin(homepage_url, href)
+        if domain_of(full_url) != domain_of(homepage_url):
+            continue
+        if not contact_url and any(h in combined for h in CONTACT_LINK_HINTS):
+            contact_url = full_url
+        if not team_url and any(h in combined for h in TEAM_LINK_HINTS):
+            team_url = full_url
+    return contact_url, team_url
+
+
+def guess_org_name(homepage_url: str, html: str) -> str:
+    soup = BeautifulSoup(html, "lxml")
+    if soup.title and soup.title.string:
+        title = soup.title.string.strip()
+        title = re.split(r"[|\-–—]", title)[0].strip()
+        if title:
+            return title
+    return domain_of(homepage_url).split(".")[0].capitalize()
+
+
+def discover_and_scrape(sector, query, max_results, config, existing_keys, today):
+    print(f"\n=== Discovering organizations for sector: {sector} ===")
+    print(f"  Search query: {query}")
+    results = duckduckgo_search(query, max_results)
+    print(f"  Found {len(results)} candidate site(s) (after filtering out social platforms).")
+
+    discovered_orgs = []
+    for title, homepage_url in results:
+        print(f"\n  Checking: {homepage_url}")
+        try:
+            html = fetch_html(homepage_url, render_js=False)
+        except Exception as e:
+            print(f"    [!] Failed to fetch homepage: {e}", file=sys.stderr)
+            continue
+        if not html or len(html) < 200:
+            print("    [!] Page looks empty (JS-rendered site, or robots.txt blocked it) — skipping.")
+            continue
+
+        contact_url, team_url = find_subpages(homepage_url, html)
+        name = guess_org_name(homepage_url, html)
+        print(f"    Guessed name: {name}")
+        print(f"    Contact page: {contact_url or homepage_url}")
+        print(f"    Team page: {team_url or '(none found — will still check homepage)'}")
+
+        org_entry = {
+            "name": name,
+            "sector": sector,
+            "team_pages": [team_url] if team_url else [],
+            "contact_pages": [contact_url] if contact_url else [homepage_url],
+            "render_js": False,
+        }
+        already = any(o["name"].lower() == name.lower() for o in config["organizations"])
+        if not already:
+            config["organizations"].append(org_entry)
+        discovered_orgs.append(org_entry)
+        time.sleep(1)  # be polite between requests
+
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    print(f"\nSaved {len(discovered_orgs)} organization(s) to config.json under '{sector}'.")
+
+    return scrape_orgs(discovered_orgs, existing_keys, today)
+
+
+# ---------------------------------------------------------------------
+# Core scraping (used by all modes once we know which orgs to visit)
+# ---------------------------------------------------------------------
+
 def load_existing_keys(path):
     keys = set()
     if os.path.exists(path):
@@ -172,6 +357,8 @@ def scrape_orgs(orgs, existing_keys, today):
             except Exception as e:
                 print(f"    [!] Failed to fetch: {e}", file=sys.stderr)
                 continue
+            if not html:
+                continue
             emails, phones = extract_contact_info(html)
             key = (name, "Org Contact", "", url)
             if (emails or phones) and key not in existing_keys:
@@ -192,6 +379,8 @@ def scrape_orgs(orgs, existing_keys, today):
                 html = fetch_html(url, render_js)
             except Exception as e:
                 print(f"    [!] Failed to fetch: {e}", file=sys.stderr)
+                continue
+            if not html:
                 continue
             people = extract_team_members(html)
             print(f"    Found {len(people)} candidate name(s).")
@@ -215,6 +404,9 @@ def str2bool(v: str) -> bool:
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--sector", default="")
+    parser.add_argument("--discover", action="store_true")
+    parser.add_argument("--query", default="")
+    parser.add_argument("--max-results", default="8")
     parser.add_argument("--org-name", default="")
     parser.add_argument("--org-sector", default="")
     parser.add_argument("--team-url", default="")
@@ -228,8 +420,17 @@ def main():
         config = json.load(f)
 
     today = datetime.now(timezone.utc).date().isoformat()
+    os.makedirs("data", exist_ok=True)
+    existing_keys = load_existing_keys(OUTPUT_PATH)
 
-    if args.org_name.strip():
+    if args.discover and args.sector.strip():
+        query = args.query.strip() or f"{args.sector.strip()} organization Indonesia"
+        new_rows = discover_and_scrape(
+            args.sector.strip(), query, int(args.max_results or 8),
+            config, existing_keys, today,
+        )
+
+    elif args.org_name.strip():
         new_org = {
             "name": args.org_name.strip(),
             "sector": args.org_sector.strip() or "Uncategorized",
@@ -237,7 +438,6 @@ def main():
             "contact_pages": [args.contact_url.strip()] if args.contact_url.strip() else [],
             "render_js": str2bool(args.render_js),
         }
-        orgs_to_scrape = [new_org]
         if str2bool(args.save_to_library):
             already = any(o["name"].lower() == new_org["name"].lower()
                           for o in config["organizations"])
@@ -246,20 +446,21 @@ def main():
                 with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=2, ensure_ascii=False)
                 print(f"Saved '{new_org['name']}' to config.json for future runs.")
+        new_rows = scrape_orgs([new_org], existing_keys, today)
+
     elif args.all:
-        orgs_to_scrape = config["organizations"]
+        new_rows = scrape_orgs(config["organizations"], existing_keys, today)
+
     elif args.sector.strip():
         orgs_to_scrape = [o for o in config["organizations"]
                           if o["sector"].strip().lower() == args.sector.strip().lower()]
         if not orgs_to_scrape:
             print(f"No orgs found in config.json for sector '{args.sector}'. "
-                  f"Nothing to scrape.")
-    else:
-        orgs_to_scrape = config["organizations"]
+                  f"Nothing to scrape. (Tip: use --discover to find some.)")
+        new_rows = scrape_orgs(orgs_to_scrape, existing_keys, today)
 
-    os.makedirs("data", exist_ok=True)
-    existing_keys = load_existing_keys(OUTPUT_PATH)
-    new_rows = scrape_orgs(orgs_to_scrape, existing_keys, today)
+    else:
+        new_rows = scrape_orgs(config["organizations"], existing_keys, today)
 
     file_exists = os.path.exists(OUTPUT_PATH)
     with open(OUTPUT_PATH, "a", newline="", encoding="utf-8") as f:
